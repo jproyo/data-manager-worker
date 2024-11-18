@@ -1,17 +1,12 @@
 use std::path::PathBuf;
 
-use async_trait::async_trait;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-
 use crate::errors::DataManagerError;
 
-#[async_trait]
 pub trait Storage {
-    async fn store(&self, name: String, data: Vec<u8>) -> Result<(), DataManagerError>;
-    async fn delete(&self, name: String) -> Result<(), DataManagerError>;
-    async fn commit(self) -> Result<(), DataManagerError>;
-    async fn rollback(self) -> Result<(), DataManagerError>;
+    fn store(&self, name: String, data: Vec<u8>) -> Result<(), DataManagerError>;
+    fn delete(&self, name: String) -> Result<(), DataManagerError>;
+    fn commit(self) -> Result<(), DataManagerError>;
+    fn rollback(self) -> Result<(), DataManagerError>;
 }
 
 #[derive(Clone)]
@@ -31,35 +26,20 @@ impl LocalStorage {
     }
 }
 
-#[async_trait]
 impl Storage for LocalStorage {
-    async fn store(&self, name: String, data: Vec<u8>) -> Result<(), DataManagerError> {
-        File::open(self.temp_dir.join(name))
-            .await?
-            .write_all(&data)
-            .await?;
+    fn store(&self, name: String, data: Vec<u8>) -> Result<(), DataManagerError> {
         Ok(())
     }
 
-    async fn delete(&self, name: String) -> Result<(), DataManagerError> {
-        tokio::fs::remove_file(self.final_dir.join(name)).await?;
+    fn delete(&self, name: String) -> Result<(), DataManagerError> {
         Ok(())
     }
 
-    async fn commit(self) -> Result<(), DataManagerError> {
-        let mut dir = tokio::fs::read_dir(self.temp_dir.clone()).await?;
-        while let Some(f) = dir.next_entry().await? {
-            let ty = f.file_type().await?;
-            if ty.is_file() {
-                tokio::fs::rename(f.path(), self.final_dir.join(f.file_name())).await?
-            }
-        }
-        tokio::fs::remove_dir(self.temp_dir).await?;
+    fn commit(self) -> Result<(), DataManagerError> {
         Ok(())
     }
 
-    async fn rollback(self) -> Result<(), DataManagerError> {
-        tokio::fs::remove_dir(self.temp_dir).await?;
+    fn rollback(self) -> Result<(), DataManagerError> {
         Ok(())
     }
 }
