@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -134,8 +135,8 @@ where
                                 let download = downloader.clone();
                                 let storage = storage.clone();
                                 move |name, url| {
-                                    let data = download.download(url).unwrap(); // Handle errors appropriately
-                                    storage.store(name, data).unwrap(); // Handle errors appropriately
+                                    let data = download.download(url)?;
+                                    storage.store(name, data)?;
                                     Ok(())
                                 }
                             };
@@ -159,16 +160,21 @@ where
                             }
                         }
                         ChunkRequest::Delete(id) => {
-                            if let Some(entry) = chunks_clone.get(&id) {
+                            let files = if let Some(entry) = chunks_clone.get(&id) {
+                                entry.files.clone()
+                            } else {
+                                HashMap::new()
+                            };
+                            if !files.is_empty() {
                                 let storage = LocalStorage::new(path.clone());
                                 let handle = {
                                     let storage = storage.clone();
                                     move |name, _url| {
-                                        storage.delete(name).unwrap(); // Handle errors appropriately
+                                        storage.delete(name)?;
                                         Ok(())
                                     }
                                 };
-                                let result = Self::handle(entry.files.clone(), handle);
+                                let result = Self::handle(files, handle);
                                 match result {
                                     Ok(_) => {
                                         if let Err(e) = storage.commit() {
@@ -232,6 +238,9 @@ where
 #[cfg(test)]
 mod tests {
     use rand::random;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{fmt, EnvFilter};
 
     use super::*;
     use crate::downloader::MockDownloader;
@@ -263,5 +272,56 @@ mod tests {
             .find_chunk(chunk.dataset_id, chunk.block_range.start + 1)
             .expect("Chunk should be found");
         assert_eq!(stored_chunk, chunk);
+    }
+
+    #[test]
+    fn test_stress_download_and_delete_chunks() {
+        use rand::random;
+        use std::sync::Arc;
+        use std::thread;
+
+        let data_dir = PathBuf::from("test_data");
+        let downloader = MockDownloader;
+        let data_manager = Arc::new(InMemoryDataManager::create(data_dir.clone(), downloader));
+        let num_chunks = 10; // Number of chunks to create
+        let num_operations = 5; // Number of download/delete operations per chunk
+
+        let handles: Vec<_> = (0..num_chunks)
+            .map(|_| {
+                let data_manager = Arc::clone(&data_manager);
+                thread::spawn(move || {
+                    let id = random();
+                    let dataset_id = random();
+                    let chunk = DataChunk {
+                        id,
+                        dataset_id,
+                        block_range: 0..100,
+                        files: vec![("file1".to_string(), "file_url".to_string())]
+                            .into_iter()
+                            .collect(),
+                    };
+
+                    // Perform multiple downloads and deletions
+                    for _ in 0..num_operations {
+                        data_manager.download_chunk(chunk.clone());
+                        data_manager.delete_chunk(chunk.id);
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to finish
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        thread::sleep(Duration::from_secs(3));
+
+        // Verify that no chunks remain in the data manager
+        let remaining_chunks = data_manager.list_chunks();
+        assert!(
+            remaining_chunks.is_empty(),
+            "Chunks should be empty after stress test"
+        );
     }
 }
