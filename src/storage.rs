@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use crate::errors::DataManagerError;
+use std::path::PathBuf;
 
 pub trait Storage {
     fn store(&self, name: String, data: Vec<u8>) -> Result<(), DataManagerError>;
