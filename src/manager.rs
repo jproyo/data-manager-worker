@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use dashmap::DashMap;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinSet;
-use tracing_subscriber::registry::Data;
 
 use crate::downloader::Downloader;
 use crate::errors::DataManagerError;
@@ -102,6 +100,7 @@ impl<D> InMemoryDataManager<D>
 where
     D: Downloader + Default + Clone + Send + Sync + 'static,
 {
+    /// Create a new InMemoryDataManager with the given path directory and downloader.
     pub fn create(path_dir: PathBuf, downloader: D) -> Self {
         let chunks = Arc::new(DashMap::new());
         let request_senders = Arc::new(DashMap::new());
@@ -114,6 +113,7 @@ where
         }
     }
 
+    /// Handle the download and deletion requests for a chunk.
     async fn handle<F, Fut>(
         files: HashMap<String, String>,
         handle: F,
